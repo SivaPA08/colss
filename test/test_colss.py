@@ -3,7 +3,7 @@ import colss
 
 
 # -----------------------------
-# Basic reductions
+# Basic reduction
 # -----------------------------
 
 def test_sigma():
