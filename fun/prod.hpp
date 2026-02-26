@@ -14,7 +14,7 @@ namespace py = pybind11;
 inline double prod(string expr, py::dict scalar_dict, py::kwargs arrays) {
     using T = double;
 
-    // --- Parse scalars ---
+    // --- Parse scalars --
     unordered_map<string, double> scalars;
     for (auto item : scalar_dict)
         scalars[item.first.cast<string>()] = item.second.cast<double>();
