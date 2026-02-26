@@ -1,6 +1,7 @@
 #pragma once
 #include "../include/compact.hpp"
 #include "../include/eval.hpp"
+#include <cmath>
 #include <omp.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pytypes.h>
@@ -8,6 +9,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
 using namespace std;
 namespace py = pybind11;
 
@@ -15,19 +17,22 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
                                  py::kwargs arrays) {
     using T = double;
 
-    // --- Parse scalars ---
     std::unordered_map<std::string, double> scalars;
     for (auto item : scalar_dict)
         scalars[item.first.cast<std::string>()] = item.second.cast<double>();
 
-    // --- Parse arrays ---
     size_t n_vars = arrays.size();
+
     std::vector<std::string> names;
     std::vector<const double *> ptrs;
     std::vector<ssize_t> sizes;
+    std::vector<py::array_t<double, py::array::c_style | py::array::forcecast>>
+        handles; // MODIFIED
+
     names.reserve(n_vars);
     ptrs.reserve(n_vars);
     sizes.reserve(n_vars);
+    handles.reserve(n_vars); // MODIFIED
 
     for (auto item : arrays) {
         std::string name = item.first.cast<std::string>();
@@ -39,46 +44,82 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
         names.push_back(name);
         ptrs.push_back(arr.data());
         sizes.push_back(arr.size());
+        handles.push_back(arr); // MODIFIED
     }
 
-    // If no arrays at all (pure scalar expr), n=1
     ssize_t n = n_vars > 0 ? sizes[0] : 1;
     for (size_t j = 1; j < n_vars; ++j)
         if (sizes[j] != n)
             throw std::runtime_error("Array size mismatch");
 
+    // MODIFIED: allocate result before GIL release, it's a Python object
     py::array_t<double> result(n);
     auto buf = result.mutable_unchecked<1>();
 
+    ssize_t nan_index =
+        -1; // MODIFIED: -1=ok, -2=compile error, >=0=NaN/Inf index
+
+    { // MODIFIED: release GIL before OMP — nothing below touches Python objects
+        py::gil_scoped_release release;
+
 #pragma omp parallel
-    {
-        exprtk::symbol_table<T> symbol_table;
-        exprtk::expression<T> expression;
-        exprtk::parser<T> parser;
+        {
+            exprtk::symbol_table<T> symbol_table;
+            exprtk::expression<T> expression;
+            exprtk::parser<T>
+                local_parser; // MODIFIED: per-thread, no data race
 
-        // Register array variables (thread-local copies)
-        std::vector<T> variables(n_vars, 0.0);
-        for (size_t j = 0; j < n_vars; ++j)
-            symbol_table.add_variable(names[j], variables[j]);
+            std::vector<T> variables(n_vars, 0.0);
 
-        // Register scalars — added once, never change per-iteration = free
-        std::unordered_map<std::string, T> scalar_locals(scalars.begin(),
-                                                         scalars.end());
-        for (auto &[name, val] : scalar_locals)
-            symbol_table.add_variable(name, scalar_locals[name]);
+            for (size_t j = 0; j < n_vars; ++j)
+                symbol_table.add_variable(names[j], variables[j]);
 
-        symbol_table.add_constants();
-        expression.register_symbol_table(symbol_table);
+            std::unordered_map<std::string, T> scalar_locals(scalars.begin(),
+                                                             scalars.end());
+            for (auto &[name, val] : scalar_locals)
+                symbol_table.add_variable(name, scalar_locals[name]);
 
-        if (!parser.compile(expr, expression))
-            throw std::runtime_error("Expression compile failed");
+            symbol_table.add_constants();
+            expression.register_symbol_table(symbol_table);
+
+            // MODIFIED: store sentinel instead of throwing inside OMP
+            if (!local_parser.compile(expr, expression)) {
+#pragma omp critical
+                if (nan_index == -1)
+                    nan_index = -2;
+            }
 
 #pragma omp for schedule(static)
-        for (ssize_t i = 0; i < n; ++i) {
-            for (size_t j = 0; j < n_vars; ++j)
-                variables[j] = ptrs[j][i];
-            buf(i) = expression.value();
+            for (ssize_t i = 0; i < n; ++i) {
+                if (nan_index != -1)
+                    continue; // MODIFIED: cheap bail on error
+
+                for (size_t j = 0; j < n_vars; ++j)
+                    variables[j] = ptrs[j][i];
+
+                T val = expression.value();
+
+                // MODIFIED: store sentinel instead of throwing inside OMP
+                if (!std::isfinite(val)) [[unlikely]] {
+#pragma omp critical
+                    if (nan_index == -1)
+                        nan_index = i;
+                    continue;
+                }
+
+                buf(i) = val;
+            }
         }
-    }
+
+    } // MODIFIED: GIL reacquired here, handles and result safely accessible
+      // after this
+
+    // MODIFIED: all throws happen here, outside OMP and after GIL reacquired
+    if (nan_index == -2)
+        throw std::runtime_error("Expression failed to compile: " + expr);
+    if (nan_index >= 0)
+        throw std::runtime_error("NaN/Inf detected at index " +
+                                 to_string(nan_index));
+
     return result;
 }
