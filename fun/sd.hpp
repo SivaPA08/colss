@@ -116,7 +116,7 @@ inline double sd(std::string expr, py::dict scalar_dict, py::kwargs arrays) {
         double mean_val = sum / n;
         double var_sum = 0.0;
 
-#pragma omp parallel for simd reduction(+ : var_sum)
+#pragma omp parallel for reduction(+ : var_sum)
         for (ssize_t i = 0; i < n; ++i) {
             double d = results[i] - mean_val;
             var_sum += d * d;
