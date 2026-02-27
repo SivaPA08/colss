@@ -1,6 +1,6 @@
 import inspect
 import numpy as np
-from colss._colss import sum as _sum
+from colss._colss import sumof as _sumof
 from colss._colss import prod as _prod
 from colss._colss import mean as _mean
 from colss._colss import query as _query
@@ -29,9 +29,9 @@ def _collect_vars(expr: str):
         raise RuntimeError(f"No variables found matching '{expr}'")
     return arrays, scalars
 
-def sum(expr: str) -> float:
+def sumof(expr: str) -> float:
     arrays, scalars = _collect_vars(expr)
-    return _sum(expr, scalars, **arrays)
+    return _sumof(expr, scalars, **arrays)
 
 def prod(expr: str) -> float:
     arrays, scalars = _collect_vars(expr)

@@ -3,7 +3,7 @@ colss is a lightweight expression evaluator that evaluates math-style string exp
 eg:
 $\Sigma\left(e^{\sin(a)} + \log^2(b+1) - c^3\right)$
 ```
-colss.sum("exp(sin(a)) + log(b+1)^2 - c^3")
+colss.sumof("exp(sin(a)) + log(b+1)^2 - c^3")
 ```
 ---
 ## Installation
@@ -41,12 +41,12 @@ colss.mean("a + b")
 colss.mean("a ^ 2 + b")
 ```
 ---
-### sum
+### sumof
 Returns the sum of the evaluated expression as a scalar.
 ```python
-colss.sum("a")
-colss.sum("a * 2")
-colss.sum("a + b")
+colss.sumof("a")
+colss.sumof("a * 2")
+colss.sumof("a + b")
 ```
 ---
 ### prod

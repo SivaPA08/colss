@@ -8,7 +8,7 @@ import colss
 
 def test_sigma():
     a = np.array([1., 2., 3., 4.])
-    assert colss.sum("a") == 10.0
+    assert colss.sumof("a") == 10.0
 
 
 def test_mean():
@@ -95,7 +95,7 @@ def test_sigma_complex():
     a = np.array([1., 2., 3., 4.])
     b = np.array([2., 2., 2., 2.])
 
-    result = colss.sum("a * b + 3")
+    result = colss.sumof("a * b + 3")
     expected = np.sum(a * b + 3)
 
     assert np.isclose(result, expected)
