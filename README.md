@@ -1,7 +1,12 @@
 # colss
 
-colss is a lightweight expression evaluator for NumPy, Pandas, and Polars. It simplifies mathematical expressions while preserving memory efficiency and execution speed.
+colss is a lightweight expression evaluator that evaluates math-style string expressions on NumPy, Pandas, Polars, and standard Python arrays, reducing verbosity compared to native syntax
 
+eg:
+$\Sigma\left(e^{\sin(a)} + \log^2(b+1) - c^3\right)$
+```
+colss.sigma("exp(sin(a)) + log(b+1)^2 - c^3")
+```
 ---
 
 ## Installation
@@ -14,182 +19,161 @@ pip install colss
 
 ## Requirements
 
-All arrays passed to colss must be:
+All arrays must be 1D, preferably `float64`, and C-contiguous. If you have a 2D array:
 
-* 1D
-* Preferably float64
-* C-contiguous
-
-If you have a 2D array:
-
-```
+```python
 a = a.ravel()
 ```
 
 ---
 
-# Usage Examples
+## Usage
 
-All functions accept string expressions.
+All functions accept a string expression. Just pass the expression — no need to register variables or pass arrays manually.
 
-## query
+### query
 
-```
+Evaluates an expression element-wise and returns a NumPy array.
+
+```python
 import numpy as np
 import colss
 
 a = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 b = np.array([4.0, 5.0, 6.0], dtype=np.float64)
 
-result = colss.query("a+b+7")
-```
-
-Ternary example:
-
-```
-colss.query("a > 1 ? 100 : 0")
-```
-
-Using mathematical functions:
-
-```
-colss.query("sqrt(a) + sin(a)")
-colss.query("exp(a)")
+colss.query("a + b + 7")
+colss.query("a > 1 ? 100 : 0")       # ternary
+colss.query("sqrt(a) + sin(b)")
+colss.query("a ^ 2")                  # a squared
+colss.query("a ^ 2 + b ^ 0.5")       # complex expression
 ```
 
 ---
 
-## mean
+### mean
 
-```
-import numpy as np
-import colss
+Returns the arithmetic mean of the evaluated expression as a scalar.
 
-a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
-
-m = colss.mean("a")
-```
-
-Expression example:
-
-```
-colss.mean("a+10")
+```python
+colss.mean("a")
+colss.mean("a + b")
+colss.mean("a ^ 2 + b")
 ```
 
 ---
 
-## sigma (sum)
+### sigma
 
-```
-import numpy as np
-import colss
+Returns the sum of the evaluated expression as a scalar.
 
-a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
-
-s = colss.sigma("a")
-```
-
-Expression example:
-
-```
-colss.sigma("a*2")
+```python
+colss.sigma("a")
+colss.sigma("a * 2")
+colss.sigma("a + b")
 ```
 
 ---
 
-## prod (Product)
+### prod
 
-```
-import numpy as np
-import colss
+Returns the product of all elements of the evaluated expression as a scalar.
 
-a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
-
-p = colss.prod("a")
-```
-
-Expression example:
-
-```
-colss.prod("a+1")
+```python
+colss.prod("a")
+colss.prod("a + 1")
+colss.prod("a * b")
 ```
 
 ---
 
-# Supported Operators
+### median
 
-Arithmetic:
+Returns the median of the evaluated expression as a scalar. For even-length arrays, returns the average of the two middle values.
 
-```
-+  -  *  /  ^ %
-```
-
-Comparison:
-
-```
->  <  >=  <=  ==  !=
-```
-
-Logical:
-
-```
-and  or not
-```
-
-Ternary:
-
-```
-condition ? value_if_true : value_if_false
+```python
+colss.median("a")
+colss.median("a + b")
+colss.median("a ^ 2 + b")
 ```
 
 ---
 
-# Available Functions Inside Expressions
+### sd
 
-```
-abs(x)
-sqrt(x)
-pow(x, y)
-log(x)
-log10(x)
-exp(x)
-sin(x)
-cos(x)
-tan(x)
-floor(x)
-ceil(x)
-min(x, y)
-max(x, y)
+Returns the population standard deviation of the evaluated expression as a scalar.
+
+```python
+colss.sd("a")
+colss.sd("a + b")
+colss.sd("sqrt(a) + b ^ 2")
 ```
 
 ---
 
-# Using with Pandas
+### variance
 
+Returns the population variance of the evaluated expression as a scalar.
+
+```python
+colss.variance("a")
+colss.variance("a + b")
+colss.variance("a ^ 2 - b")
 ```
+
+---
+
+## Using with Pandas
+
+```python
 import pandas as pd
 import numpy as np
 import colss
 
- df = pd.DataFrame({
+df = pd.DataFrame({
     "a": [1.0, 2.0, 3.0],
     "b": [4.0, 5.0, 6.0]
 })
 
-# Pandas evaluation
- df["c"] = df.eval("a + b + 7")
+a = df["a"].to_numpy(dtype=np.float64)
+b = df["b"].to_numpy(dtype=np.float64)
 
-# colss evaluation
- a = df["a"].to_numpy(dtype=np.float64)
- b = df["b"].to_numpy(dtype=np.float64)
-
- df["d"] = colss.query("a+b+7")
+df["c"] = colss.query("a + b + 7")
+m       = colss.mean("a + b")
+med     = colss.median("a")
+s       = colss.sd("a + b")
 ```
 
 ---
 
-# Notes
+## Operators
 
-* All variables used in expressions must be registered inside colss before evaluation.
-* All functions (`query`, `mean`, `sigma`, `prod`) accept string expressions.
-* Designed for memory efficiency and predictable performance.
+| Operator | Description |
+|----------|-------------|
+| `+` `-` `*` `/` | Arithmetic |
+| `^` | Exponentiation — `a ^ 2` raises `a` to the power of 2 |
+| `%` | Modulo |
+| `>` `<` `>=` `<=` `==` `!=` | Comparison |
+| `and` `or` `not` | Logical |
+| `condition ? a : b` | Ternary |
+
+---
+
+## Available Functions
+
+```
+abs(x)       sqrt(x)      
+log(x)       log10(x)     exp(x)
+sin(x)       cos(x)       tan(x)
+floor(x)     ceil(x)
+min(x, y)    max(x, y)
+```
+
+---
+
+## Notes
+
+- `^` is exponentiation, not bitwise XOR.
+- All arrays used in an expression must be the same length.
+- You can use both scalar and vector at the same time.
+- A NaN or Inf result raises an error identifying the first offending index.
