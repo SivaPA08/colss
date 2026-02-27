@@ -6,6 +6,7 @@ from colss._colss import mean as _mean
 from colss._colss import query as _query
 from colss._colss import sd as _sd
 from colss._colss import var as _var
+from colss._colss import median as _median
 
 def _collect_vars(expr: str):
     frame = inspect.currentframe()
@@ -51,3 +52,7 @@ def sd(expr: str) -> float:
 def var(expr: str) -> float:
     arrays, scalars = _collect_vars(expr)
     return _var(expr, scalars, **arrays)
+
+def median(expr: str) -> float:
+    arrays, scalars = _collect_vars(expr)
+    return _median(expr, scalars, **arrays)

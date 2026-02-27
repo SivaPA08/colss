@@ -1,4 +1,5 @@
 #include "fun/mean.hpp"
+#include "fun/median.hpp"
 #include "fun/prod.hpp"
 #include "fun/query.hpp"
 #include "fun/sd.hpp"
@@ -13,4 +14,5 @@ PYBIND11_MODULE(_colss, m) {
     m.def("mean", &mean, py::arg("expr"), py::arg("scalar_dict"));
     m.def("var", &var, py::arg("expr"), py::arg("scalar_dict"));
     m.def("sd", &sd, py::arg("expr"), py::arg("scalar_dict"));
+    m.def("median", &median, py::arg("expr"), py::arg("scalar_dict"));
 }
