@@ -118,3 +118,74 @@ def test_sd_basic():
 
     assert np.isclose(result, expected)
 
+def test_median_odd_length():
+    a = np.array([5., 1., 3., 2., 4.])
+    expected = np.median(a)
+    result = colss.median("a")
+    assert np.isclose(result, expected)
+
+
+def test_median_even_length():
+    a = np.array([1., 2., 3., 4.])
+    expected = np.median(a)
+    result = colss.median("a")
+    assert np.isclose(result, expected)
+
+
+def test_median_negative_values():
+    a = np.array([-5., -1., -3., -2., -4.])
+    expected = np.median(a)
+    result = colss.median("a")
+    assert np.isclose(result, expected)
+
+
+def test_median_repeated_values():
+    a = np.array([2., 2., 2., 2., 2.])
+    expected = np.median(a)
+    result = colss.median("a")
+    assert np.isclose(result, expected)
+
+
+def test_median_expression_basic():
+    a = np.array([1., 2., 3., 4., 5.])
+    b = np.array([5., 4., 3., 2., 1.])
+
+    expected = np.median(a + b)
+    result = colss.median("a + b")
+
+    assert np.isclose(result, expected)
+
+
+def test_median_expression_complex():
+    a = np.array([1., 2., 3., 4., 5.])
+
+    expected = np.median(
+        np.sin(a) +
+        np.log(a + 1) +
+        np.sqrt(a**2 + 3*a + 1) +
+        np.cos(np.pi * a)
+    )
+
+    result = colss.median(
+        "sin(a) + log(a+1) + sqrt(a^2 + 3*a + 1) + cos(pi*a)"
+    )
+
+    assert np.isclose(result, expected)
+
+
+def test_median_random_large():
+    a = np.random.rand(1000).astype(np.float64)
+
+    expected = np.median(a)
+    result = colss.median("a")
+
+    assert np.isclose(result, expected)
+
+
+def test_median_even_expression():
+    a = np.array([1., 2., 3., 4.])
+
+    expected = np.median(a * 2 + 1)
+    result = colss.median("a * 2 + 1")
+
+    assert np.isclose(result, expected)
