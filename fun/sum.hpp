@@ -13,7 +13,7 @@
 using namespace std;
 namespace py = pybind11;
 
-inline double sigma(string expr, py::dict scalar_dict, py::kwargs arrays) {
+inline double sum(string expr, py::dict scalar_dict, py::kwargs arrays) {
     using T = double;
 
     unordered_map<string, double> scalars;
