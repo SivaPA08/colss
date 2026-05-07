@@ -81,6 +81,27 @@ colss.variance("a + b")
 colss.variance("a ^ 2 - b")
 ```
 ---
+## NumPy Compatibility
+
+`colss.query()` returns a NumPy array, so you can directly use NumPy array methods and operations like `.mean()`, `.sum()`, `.reshape()`, `.astype()`, `.max()`, `.min()`, `.std()`, `.var()`, and more on the result.
+
+```python
+import numpy as np
+import colss
+
+a = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+b = np.array([4.0, 5.0, 6.0], dtype=np.float64)
+
+colss.query("a + b").mean()
+colss.query("a ^ 2").sum()
+colss.query("sqrt(a)").reshape((3, 1))
+colss.query("a * b").astype(np.float32)
+colss.query("a + 5").max()
+colss.query("a + b").min()
+colss.query("a ^ 2").std()
+colss.query("a ^ 2").var()
+```
+---
 ## Using with Pandas
 ```python
 import pandas as pd
