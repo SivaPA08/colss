@@ -1,4 +1,5 @@
 import inspect
+import re
 import numpy as np
 from colss._colss import sumof as _sumof
 from colss._colss import prod as _prod
@@ -11,22 +12,32 @@ from colss._colss import median as _median
 def _collect_vars(expr: str):
     frame = inspect.currentframe()
     frame = frame.f_back.f_back if frame and frame.f_back else None
+
     arrays = {}
     scalars = {}
+
     while frame is not None:
+
         for name, val in frame.f_locals.items():
-            if name not in expr:
+
+            if not re.search(rf"\b{re.escape(name)}\b", expr):
                 continue
+
             if isinstance(val, np.ndarray):
+
                 if name not in arrays:
-                    arrays[name] = np.ascontiguousarray(val, dtype=np.float64)
-            elif isinstance(val, (int, float)) and name not in scalars:
-                scalars[name] = float(val)
-        if arrays or scalars:
-            break
+                    arrays[name] = np.ascontiguousarray(
+                        val,
+                        dtype=np.float64
+                    )
+
+            elif isinstance(val, (int, float)):
+
+                if name not in scalars:
+                    scalars[name] = float(val)
+
         frame = frame.f_back
-    if not arrays and not scalars:
-        raise RuntimeError(f"No variables found matching '{expr}'")
+
     return arrays, scalars
 
 def sumof(expr: str) -> float:
