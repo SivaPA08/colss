@@ -128,6 +128,31 @@ s       = colss.sd("a + b")
 | `>` `<` `>=` `<=` `==` `!=` | Comparison |
 | `and` `or` `not` | Logical |
 | `condition ? a : b` | Ternary |
+
+
+```python
+import numpy as np
+import colss
+
+a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
+b = np.array([4.0, 3.0, 2.0, 1.0], dtype=np.float64)
+
+# comparison
+colss.query("a > 2")
+colss.query("a <= b")
+colss.query("a == b")
+
+# logical
+colss.query("(a > 1) and (b < 4)")
+colss.query("(a > 2) or (b == 1)")
+colss.query("not(a > 2)")
+
+# ternary
+colss.query("a > 2 ? a * 10 : a + 1")
+
+# conditional
+colss.query("if(a>b,a,b)")
+```
 ---
 ## Available Functions
 ```
