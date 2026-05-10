@@ -1,5 +1,8 @@
 # colss
 colss is a lightweight expression evaluator that evaluates math-style string expressions on NumPy, Pandas, Polars, and standard Python arrays, reducing verbosity compared to native syntax
+
+Source: https://github.com/SivaPA08/colss
+
 eg:
 $\Sigma\left(e^{\sin(a)} + \log^2(b+1) - c^3\right)$
 ```
