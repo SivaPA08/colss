@@ -76,9 +76,9 @@ colss.sd("sqrt(a) + b ^ 2")
 ### variance
 Returns the population variance of the evaluated expression as a scalar.
 ```python
-colss.variance("a")
-colss.variance("a + b")
-colss.variance("a ^ 2 - b")
+colss.var("a")
+colss.var("a + b")
+colss.var("a ^ 2 - b")
 ```
 ---
 ## NumPy Compatibility
