@@ -1,173 +1,130 @@
 # colss
-colss is a lightweight expression evaluator that evaluates math-style string expressions on NumPy, Pandas, Polars, and standard Python arrays, reducing verbosity compared to native syntax
 
-Source: https://github.com/SivaPA08/colss
+Fast expression evaluator for NumPy.
 
-eg:
-$\Sigma\left(e^{\sin(a)} + \log^2(b+1) - c^3\right)$
-```
-colss.sumof("exp(sin(a)) + log(b+1)^2 - c^3")
-```
+
+**GitHub:** https://github.com/SivaPA08/colss
+
 ---
-## Installation
-```
+
+# Features
+
+| Category      | Support               |
+|---------------|-----------------------|
+| Arithmetic    | `+ - * / %`           |
+| Bitwise       | `& \| ~ << >> ^`      |
+| Logical       | `&& \|\| !`           |
+| Comparison    | `== != < <= > >=`     |
+| Ternary       | `?:`                  |
+| Trigonometric | `sin cos tan asin acos atan` |
+| Logarithmic   | `log log10`           |
+| Exponential   | `exp`                 |
+| Root          | `sqrt`                |
+| Rounding      | `floor ceil round`    |
+| Utility       | `abs min max`         |
+
+---
+
+# Installation
+
+```bash
 pip install colss
 ```
----
-## Requirements
-All arrays must be 1D, preferably `float64`, and C-contiguous. If you have a 2D array:
-```python
-a = a.ravel()
-```
----
-## Usage
-All functions accept a string expression. Just pass the expression — no need to register variables or pass arrays manually.
-### query
-Evaluates an expression element-wise and returns a NumPy array.
-```python
-import numpy as np
-import colss
-a = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-b = np.array([4.0, 5.0, 6.0], dtype=np.float64)
-colss.query("a + b + 7")
-colss.query("a > 1 ? 100 : 0")       # ternary
-colss.query("sqrt(a) + sin(b)")
-colss.query("a ^ 2")                  # a squared
-colss.query("a ^ 2 + b ^ 0.5")       # complex expression
-```
----
-### mean
-Returns the arithmetic mean of the evaluated expression as a scalar.
-```python
-colss.mean("a")
-colss.mean("a + b")
-colss.mean("a ^ 2 + b")
-```
----
-### sumof
-Returns the sum of the evaluated expression as a scalar.
-```python
-colss.sumof("a")
-colss.sumof("a * 2")
-colss.sumof("a + b")
-```
----
-### prod
-Returns the product of all elements of the evaluated expression as a scalar.
-```python
-colss.prod("a")
-colss.prod("a + 1")
-colss.prod("a * b")
-```
----
-### median
-Returns the median of the evaluated expression as a scalar. For even-length arrays, returns the average of the two middle values.
-```python
-colss.median("a")
-colss.median("a + b")
-colss.median("a ^ 2 + b")
-```
----
-### sd
-Returns the population standard deviation of the evaluated expression as a scalar.
-```python
-colss.sd("a")
-colss.sd("a + b")
-colss.sd("sqrt(a) + b ^ 2")
-```
----
-### variance
-Returns the population variance of the evaluated expression as a scalar.
-```python
-colss.var("a")
-colss.var("a + b")
-colss.var("a ^ 2 - b")
-```
----
-## NumPy Compatibility
 
-`colss.query()` returns a NumPy array, so you can directly use NumPy array methods and operations like `.mean()`, `.sum()`, `.reshape()`, `.astype()`, `.max()`, `.min()`, `.std()`, `.var()`, and more on the result.
+---
+
+# Usage
 
 ```python
 import numpy as np
-import colss
+import colss as cs
 
-a = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-b = np.array([4.0, 5.0, 6.0], dtype=np.float64)
+a = np.array([1.0, 2.0, 3.0])
+b = np.array([4.0, 5.0, 6.0])
 
-colss.query("a + b").mean()
-colss.query("a ^ 2").sum()
-colss.query("sqrt(a)").reshape((3, 1))
-colss.query("a * b").astype(np.float32)
-colss.query("a + 5").max()
-colss.query("a + b").min()
-colss.query("a ^ 2").std()
-colss.query("a ^ 2").var()
+print(cs.query("a + b", a=a, b=b))
+print(cs.query("sqrt(a) + sin(b)", a=a, b=b))
+print(cs.query("a > b ? a : b", a=a, b=b))
+print(cs.query("max(1,1,3,1,1)"))
 ```
----
-## Using with Pandas
-```python
-import pandas as pd
-import numpy as np
-import colss
-df = pd.DataFrame({
-    "a": [1.0, 2.0, 3.0],
-    "b": [4.0, 5.0, 6.0]
-})
-a = df["a"].to_numpy(dtype=np.float64)
-b = df["b"].to_numpy(dtype=np.float64)
-df["c"] = colss.query("a + b + 7")
-m       = colss.mean("a + b")
-med     = colss.median("a")
-s       = colss.sd("a + b")
-```
----
-## Operators
-| Operator | Description |
-|----------|-------------|
-| `+` `-` `*` `/` | Arithmetic |
-| `^` | Exponentiation — `a ^ 2` raises `a` to the power of 2 |
-| `%` | Modulo |
-| `>` `<` `>=` `<=` `==` `!=` | Comparison |
-| `and` `or` `not` | Logical |
-| `condition ? a : b` | Ternary |
 
+---
+
+# Syntax
 
 ```python
+a + b
+a - b
+a * b
+a / b
+a % b
+a ^ b
+
+(a + b) * c
+
+a > b
+a <= b
+a == b
+
+(a > 0) && (b > 0)
+(a > 0) || (b > 0)
+!(a > 0)
+
+a > b ? a : b
+```
+
+---
+
+# Functions
+
+```text
+abs(x)
+sqrt(x)
+log(x)
+log10(x)
+exp(x)
+sin(x)
+cos(x)
+tan(x)
+asin(x)
+acos(x)
+atan(x)
+floor(x)
+ceil(x)
+round(x)
+min(...)
+max(...)
+```
+
+`min()` and `max()` support multiple arguments.
+
+```python
+cs.query("max(1,1,3,1,1)")
+cs.query("min(a,b,c,d)")
+```
+
+---
+
+# Multidimensional Arrays
+
+`colss` supports multidimensional arrays directly.
+
+```python
 import numpy as np
-import colss
+import colss as cs
 
-a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
-b = np.array([4.0, 3.0, 2.0, 1.0], dtype=np.float64)
+a = np.random.rand(2, 3, 4)
+b = np.random.rand(2, 3, 4)
 
-# comparison
-colss.query("a > 2")
-colss.query("a <= b")
-colss.query("a == b")
-
-# logical
-colss.query("(a > 1) and (b < 4)")
-colss.query("(a > 2) or (b == 1)")
-colss.query("not(a > 2)")
-
-# ternary
-colss.query("a > 2 ? a * 10 : a + 1")
-
-# conditional
-colss.query("if(a>b,a,b)")
+res = cs.query("a + b", a=a, b=b)
+print(res.shape)
 ```
+
 ---
-## Available Functions
-```
-abs(x)       sqrt(x)      
-log(x)       log10(x)     exp(x)
-sin(x)       cos(x)       tan(x)
-floor(x)     ceil(x)
-min(x, y)    max(x, y)
-```
----
-## Notes
-- `^` is exponentiation, not bitwise XOR.
-- All arrays used in an expression must be the same length.
-- You can use both scalar and vector at the same time.
-- A NaN or Inf result raises an error identifying the first offending index.
+
+# Notes
+
+* Arrays in the same expression must have identical shapes.
+* `query()` returns a NumPy array.
+* For best performance, use `float64` and C-contiguous arrays.
+* No constants are built in.
