@@ -29,6 +29,460 @@
 
 namespace evalpp {
 
+// ---------------------------------------------------------------------------
+// Vectorized Math Abstraction (xsimd, SLEEF, Intel SVML)
+// ---------------------------------------------------------------------------
+#if !defined(USE_XSIMD) && __has_include(<xsimd/xsimd.hpp>)
+#define USE_XSIMD 1
+#endif
+
+#if !defined(USE_SLEEF) && __has_include(<sleef.h>)
+#define USE_SLEEF 1
+#endif
+
+#if defined(USE_XSIMD)
+#include <xsimd/xsimd.hpp>
+
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+    using batch_type = xsimd::batch<double>;
+    constexpr std::size_t simd_size = batch_type::size;
+    std::size_t vec_size = n - (n % simd_size);
+    for (std::size_t i = 0; i < vec_size; i += simd_size) {
+        auto b = xsimd::load_unaligned(&in[i]);
+        auto r = xsimd::sin(b);
+        r.store_unaligned(&out[i]);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+    using batch_type = xsimd::batch<double>;
+    constexpr std::size_t simd_size = batch_type::size;
+    std::size_t vec_size = n - (n % simd_size);
+    for (std::size_t i = 0; i < vec_size; i += simd_size) {
+        auto b = xsimd::load_unaligned(&in[i]);
+        auto r = xsimd::cos(b);
+        r.store_unaligned(&out[i]);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+
+inline void vec_log(const double *in, double *out, std::size_t n) {
+    using batch_type = xsimd::batch<double>;
+    constexpr std::size_t simd_size = batch_type::size;
+    std::size_t vec_size = n - (n % simd_size);
+    for (std::size_t i = 0; i < vec_size; i += simd_size) {
+        auto b = xsimd::load_unaligned(&in[i]);
+        auto r = xsimd::log(b);
+        r.store_unaligned(&out[i]);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+    using batch_type = xsimd::batch<double>;
+    constexpr std::size_t simd_size = batch_type::size;
+    std::size_t vec_size = n - (n % simd_size);
+    for (std::size_t i = 0; i < vec_size; i += simd_size) {
+        auto b = xsimd::load_unaligned(&in_base[i]);
+        auto e = xsimd::load_unaligned(&in_exp[i]);
+        auto r = xsimd::pow(b, e);
+        r.store_unaligned(&out[i]);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+
+#elif defined(USE_SVML)
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) ||             \
+    defined(_M_IX86)
+#include <immintrin.h>
+
+extern "C" {
+__m128d _mm_sin_pd(__m128d);
+__m128d _mm_cos_pd(__m128d);
+__m128d _mm_log_pd(__m128d);
+__m128d _mm_pow_pd(__m128d, __m128d);
+
+__m256d _mm256_sin_pd(__m256d);
+__m256d _mm256_cos_pd(__m256d);
+__m256d _mm256_log_pd(__m256d);
+__m256d _mm256_pow_pd(__m256d, __m256d);
+
+__m512d _mm512_sin_pd(__m512d);
+__m512d _mm512_cos_pd(__m512d);
+__m512d _mm512_log_pd(__m512d);
+__m512d _mm512_pow_pd(__m512d, __m512d);
+}
+
+#if defined(__AVX512F__)
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in[i]);
+        __m512d r = _mm512_sin_pd(b);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in[i]);
+        __m512d r = _mm512_cos_pd(b);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+inline void vec_log(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in[i]);
+        __m512d r = _mm512_log_pd(b);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in_base[i]);
+        __m512d e = _mm512_loadu_pd(&in_exp[i]);
+        __m512d r = _mm512_pow_pd(b, e);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+#elif defined(__AVX2__) || defined(__AVX__)
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in[i]);
+        __m256d r = _mm256_sin_pd(b);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in[i]);
+        __m256d r = _mm256_cos_pd(b);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+inline void vec_log(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in[i]);
+        __m256d r = _mm256_log_pd(b);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in_base[i]);
+        __m256d e = _mm256_loadu_pd(&in_exp[i]);
+        __m256d r = _mm256_pow_pd(b, e);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+#elif defined(__SSE2__)
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in[i]);
+        __m128d r = _mm_sin_pd(b);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in[i]);
+        __m128d r = _mm_cos_pd(b);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+inline void vec_log(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in[i]);
+        __m128d r = _mm_log_pd(b);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in_base[i]);
+        __m128d e = _mm_loadu_pd(&in_exp[i]);
+        __m128d r = _mm_pow_pd(b, e);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+#else
+#define SVML_FALLBACK 1
+#endif
+#else
+#define SVML_FALLBACK 1
+#endif
+
+#endif
+
+#if defined(USE_SLEEF)
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) ||             \
+    defined(_M_IX86)
+#include <immintrin.h>
+
+#if __has_include(<sleef.h>)
+#include <sleef.h>
+#else
+extern "C" {
+__m128d Sleef_sind2_u10sse2(__m128d);
+__m128d Sleef_cosd2_u10sse2(__m128d);
+__m128d Sleef_logd2_u10sse2(__m128d);
+__m128d Sleef_powd2_u10sse2(__m128d, __m128d);
+
+__m256d Sleef_sind4_u10avx2(__m256d);
+__m256d Sleef_cosd4_u10avx2(__m256d);
+__m256d Sleef_logd4_u10avx2(__m256d);
+__m256d Sleef_powd4_u10avx2(__m256d, __m256d);
+
+__m512d Sleef_sind8_u10avx512f(__m512d);
+__m512d Sleef_cosd8_u10avx512f(__m512d);
+__m512d Sleef_logd8_u10avx512f(__m512d);
+__m512d Sleef_powd8_u10avx512f(__m512d, __m512d);
+}
+#endif
+
+#if defined(__AVX512F__)
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in[i]);
+        __m512d r = Sleef_sind8_u10avx512f(b);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in[i]);
+        __m512d r = Sleef_cosd8_u10avx512f(b);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+inline void vec_log(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in[i]);
+        __m512d r = Sleef_logd8_u10avx512f(b);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+    std::size_t vec_size = n - (n % 8);
+    for (std::size_t i = 0; i < vec_size; i += 8) {
+        __m512d b = _mm512_loadu_pd(&in_base[i]);
+        __m512d e = _mm512_loadu_pd(&in_exp[i]);
+        __m512d r = Sleef_powd8_u10avx512f(b, e);
+        _mm512_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+#elif defined(__AVX2__) || defined(__AVX__)
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in[i]);
+        __m256d r = Sleef_sind4_u10avx2(b);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in[i]);
+        __m256d r = Sleef_cosd4_u10avx2(b);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+inline void vec_log(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in[i]);
+        __m256d r = Sleef_logd4_u10avx2(b);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+    std::size_t vec_size = n - (n % 4);
+    for (std::size_t i = 0; i < vec_size; i += 4) {
+        __m256d b = _mm256_loadu_pd(&in_base[i]);
+        __m256d e = _mm256_loadu_pd(&in_exp[i]);
+        __m256d r = Sleef_powd4_u10avx2(b, e);
+        _mm256_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+#elif defined(__SSE2__)
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in[i]);
+        __m128d r = Sleef_sind2_u10sse2(b);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in[i]);
+        __m128d r = Sleef_cosd2_u10sse2(b);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+inline void vec_log(const double *in, double *out, std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in[i]);
+        __m128d r = Sleef_logd2_u10sse2(b);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+    std::size_t vec_size = n - (n % 2);
+    for (std::size_t i = 0; i < vec_size; i += 2) {
+        __m128d b = _mm_loadu_pd(&in_base[i]);
+        __m128d e = _mm_loadu_pd(&in_exp[i]);
+        __m128d r = Sleef_powd2_u10sse2(b, e);
+        _mm_storeu_pd(&out[i], r);
+    }
+    for (std::size_t i = vec_size; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+#else
+#define SLEEF_FALLBACK 1
+#endif
+#else
+#define SLEEF_FALLBACK 1
+#endif
+
+#endif
+
+#if !defined(USE_XSIMD) && !(defined(USE_SVML) && !defined(SVML_FALLBACK)) &&  \
+    !(defined(USE_SLEEF) && !defined(SLEEF_FALLBACK))
+inline void vec_sin(const double *in, double *out, std::size_t n) {
+#pragma omp simd
+    for (std::size_t i = 0; i < n; ++i) {
+        out[i] = std::sin(in[i]);
+    }
+}
+
+inline void vec_cos(const double *in, double *out, std::size_t n) {
+#pragma omp simd
+    for (std::size_t i = 0; i < n; ++i) {
+        out[i] = std::cos(in[i]);
+    }
+}
+
+inline void vec_log(const double *in, double *out, std::size_t n) {
+#pragma omp simd
+    for (std::size_t i = 0; i < n; ++i) {
+        out[i] = std::log(in[i]);
+    }
+}
+
+inline void vec_pow(const double *in_base, const double *in_exp, double *out,
+                    std::size_t n) {
+#pragma omp simd
+    for (std::size_t i = 0; i < n; ++i) {
+        out[i] = std::pow(in_base[i], in_exp[i]);
+    }
+}
+#endif
+
 enum class TokenType {
     End,
     Number,
@@ -428,7 +882,8 @@ class Program {
     // eval(n, out, vars)  — vectorized VM fast path.
     // -----------------------------------------------------------------------
     void eval(std::size_t n, double *out, const double *const *vars) const {
-        if (n == 0) return;
+        if (n == 0)
+            return;
 
         bool has_branches = false;
         for (const auto &inst : code) {
@@ -526,7 +981,8 @@ class Program {
         double *r = *--sp;
         double *l = *--sp;
         for (std::size_t i = 0; i < n; ++i) {
-            if (r[i] == 0.0) throw std::runtime_error("Division by zero");
+            if (r[i] == 0.0)
+                throw std::runtime_error("Division by zero");
         }
         double *dest = sp_storage + (sp - stack) * n;
 #pragma omp simd
@@ -541,7 +997,8 @@ class Program {
         double *r = *--sp;
         double *l = *--sp;
         for (std::size_t i = 0; i < n; ++i) {
-            if (r[i] == 0.0) throw std::runtime_error("Modulo by zero");
+            if (r[i] == 0.0)
+                throw std::runtime_error("Modulo by zero");
         }
         double *dest = sp_storage + (sp - stack) * n;
 #pragma omp simd
@@ -559,7 +1016,7 @@ class Program {
 #pragma omp simd
         for (std::size_t i = 0; i < n; ++i) {
             dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) &
-                                           static_cast<int64_t>(r[i]));
+                                          static_cast<int64_t>(r[i]));
         }
         *sp++ = dest;
         ++ip;
@@ -572,7 +1029,7 @@ class Program {
 #pragma omp simd
         for (std::size_t i = 0; i < n; ++i) {
             dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) |
-                                           static_cast<int64_t>(r[i]));
+                                          static_cast<int64_t>(r[i]));
         }
         *sp++ = dest;
         ++ip;
@@ -582,10 +1039,7 @@ class Program {
         double *r = *--sp;
         double *l = *--sp;
         double *dest = sp_storage + (sp - stack) * n;
-#pragma omp simd
-        for (std::size_t i = 0; i < n; ++i) {
-            dest[i] = std::pow(l[i], r[i]);
-        }
+        evalpp::vec_pow(l, r, dest, n);
         *sp++ = dest;
         ++ip;
         DISPATCH();
@@ -610,7 +1064,7 @@ class Program {
 #pragma omp simd
         for (std::size_t i = 0; i < n; ++i) {
             dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) >>
-                                           static_cast<int64_t>(r[i]));
+                                          static_cast<int64_t>(r[i]));
         }
         *sp++ = dest;
         ++ip;
@@ -739,16 +1193,10 @@ class Program {
         double *dest = sp_storage + (sp - stack) * n;
         switch (b) {
         case Builtin::Sin:
-#pragma omp simd
-            for (std::size_t i = 0; i < n; ++i) {
-                dest[i] = std::sin(args[0][i]);
-            }
+            evalpp::vec_sin(args[0], dest, n);
             break;
         case Builtin::Cos:
-#pragma omp simd
-            for (std::size_t i = 0; i < n; ++i) {
-                dest[i] = std::cos(args[0][i]);
-            }
+            evalpp::vec_cos(args[0], dest, n);
             break;
         case Builtin::Tan:
 #pragma omp simd
@@ -781,16 +1229,10 @@ class Program {
             }
             break;
         case Builtin::Pow:
-#pragma omp simd
-            for (std::size_t i = 0; i < n; ++i) {
-                dest[i] = std::pow(args[0][i], args[1][i]);
-            }
+            evalpp::vec_pow(args[0], args[1], dest, n);
             break;
         case Builtin::Log:
-#pragma omp simd
-            for (std::size_t i = 0; i < n; ++i) {
-                dest[i] = std::log(args[0][i]);
-            }
+            evalpp::vec_log(args[0], dest, n);
             break;
         case Builtin::Log10:
 #pragma omp simd
@@ -917,7 +1359,8 @@ class Program {
                 double *r = *--sp;
                 double *l = *--sp;
                 for (std::size_t i = 0; i < n; ++i) {
-                    if (r[i] == 0.0) throw std::runtime_error("Division by zero");
+                    if (r[i] == 0.0)
+                        throw std::runtime_error("Division by zero");
                 }
                 double *dest = sp_storage + (sp - stack) * n;
                 for (std::size_t i = 0; i < n; ++i) {
@@ -931,7 +1374,8 @@ class Program {
                 double *r = *--sp;
                 double *l = *--sp;
                 for (std::size_t i = 0; i < n; ++i) {
-                    if (r[i] == 0.0) throw std::runtime_error("Modulo by zero");
+                    if (r[i] == 0.0)
+                        throw std::runtime_error("Modulo by zero");
                 }
                 double *dest = sp_storage + (sp - stack) * n;
                 for (std::size_t i = 0; i < n; ++i) {
@@ -947,7 +1391,7 @@ class Program {
                 double *dest = sp_storage + (sp - stack) * n;
                 for (std::size_t i = 0; i < n; ++i) {
                     dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) &
-                                                   static_cast<int64_t>(r[i]));
+                                                  static_cast<int64_t>(r[i]));
                 }
                 *sp++ = dest;
                 ++ip;
@@ -959,7 +1403,7 @@ class Program {
                 double *dest = sp_storage + (sp - stack) * n;
                 for (std::size_t i = 0; i < n; ++i) {
                     dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) |
-                                                   static_cast<int64_t>(r[i]));
+                                                  static_cast<int64_t>(r[i]));
                 }
                 *sp++ = dest;
                 ++ip;
@@ -969,9 +1413,7 @@ class Program {
                 double *r = *--sp;
                 double *l = *--sp;
                 double *dest = sp_storage + (sp - stack) * n;
-                for (std::size_t i = 0; i < n; ++i) {
-                    dest[i] = std::pow(l[i], r[i]);
-                }
+                evalpp::vec_pow(l, r, dest, n);
                 *sp++ = dest;
                 ++ip;
                 break;
@@ -981,8 +1423,9 @@ class Program {
                 double *l = *--sp;
                 double *dest = sp_storage + (sp - stack) * n;
                 for (std::size_t i = 0; i < n; ++i) {
-                    dest[i] = static_cast<double>(static_cast<int64_t>(l[i])
-                                                  << static_cast<int64_t>(r[i]));
+                    dest[i] =
+                        static_cast<double>(static_cast<int64_t>(l[i])
+                                            << static_cast<int64_t>(r[i]));
                 }
                 *sp++ = dest;
                 ++ip;
@@ -994,7 +1437,7 @@ class Program {
                 double *dest = sp_storage + (sp - stack) * n;
                 for (std::size_t i = 0; i < n; ++i) {
                     dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) >>
-                                                   static_cast<int64_t>(r[i]));
+                                                  static_cast<int64_t>(r[i]));
                 }
                 *sp++ = dest;
                 ++ip;
@@ -1115,14 +1558,10 @@ class Program {
                 double *dest = sp_storage + (sp - stack) * n;
                 switch (b) {
                 case Builtin::Sin:
-                    for (std::size_t i = 0; i < n; ++i) {
-                        dest[i] = std::sin(args[0][i]);
-                    }
+                    evalpp::vec_sin(args[0], dest, n);
                     break;
                 case Builtin::Cos:
-                    for (std::size_t i = 0; i < n; ++i) {
-                        dest[i] = std::cos(args[0][i]);
-                    }
+                    evalpp::vec_cos(args[0], dest, n);
                     break;
                 case Builtin::Tan:
                     for (std::size_t i = 0; i < n; ++i) {
@@ -1150,14 +1589,10 @@ class Program {
                     }
                     break;
                 case Builtin::Pow:
-                    for (std::size_t i = 0; i < n; ++i) {
-                        dest[i] = std::pow(args[0][i], args[1][i]);
-                    }
+                    evalpp::vec_pow(args[0], args[1], dest, n);
                     break;
                 case Builtin::Log:
-                    for (std::size_t i = 0; i < n; ++i) {
-                        dest[i] = std::log(args[0][i]);
-                    }
+                    evalpp::vec_log(args[0], dest, n);
                     break;
                 case Builtin::Log10:
                     for (std::size_t i = 0; i < n; ++i) {
@@ -1278,14 +1713,16 @@ class Program {
     }
     op_div: {
         double r = *--sp;
-        if (r == 0.0) throw std::runtime_error("Division by zero");
+        if (r == 0.0)
+            throw std::runtime_error("Division by zero");
         *(sp - 1) /= r;
         ++ip;
         DISPATCH();
     }
     op_mod: {
         double r = *--sp;
-        if (r == 0.0) throw std::runtime_error("Modulo by zero");
+        if (r == 0.0)
+            throw std::runtime_error("Modulo by zero");
         *(sp - 1) = std::fmod(*(sp - 1), r);
         ++ip;
         DISPATCH();
@@ -1481,13 +1918,15 @@ class Program {
             }
             case Op::Div: {
                 double r = *--sp;
-                if (r == 0.0) throw std::runtime_error("Division by zero");
+                if (r == 0.0)
+                    throw std::runtime_error("Division by zero");
                 *(sp - 1) /= r;
                 break;
             }
             case Op::Mod: {
                 double r = *--sp;
-                if (r == 0.0) throw std::runtime_error("Modulo by zero");
+                if (r == 0.0)
+                    throw std::runtime_error("Modulo by zero");
                 *(sp - 1) = std::fmod(*(sp - 1), r);
                 break;
             }
@@ -1800,9 +2239,7 @@ class Compiler {
         return n;
     }
 
-    uint32_t parseBitXor() {
-        return parseBitAnd();
-    }
+    uint32_t parseBitXor() { return parseBitAnd(); }
 
     uint32_t parseBitAnd() {
         uint32_t n = parseEq();
@@ -2066,7 +2503,8 @@ class Compiler {
                 uint32_t r = parsePow();
                 if (ast_[n].type == ASTNode::Type::Const &&
                     ast_[r].type == ASTNode::Type::Const) {
-                    if (ast_[r].val == 0.0) throw std::runtime_error("Division by zero");
+                    if (ast_[r].val == 0.0)
+                        throw std::runtime_error("Division by zero");
                     ast_[n].val /= ast_[r].val;
                 } else
                     n = makeNode({ASTNode::Type::Binary,
@@ -2082,7 +2520,8 @@ class Compiler {
                 uint32_t r = parsePow();
                 if (ast_[n].type == ASTNode::Type::Const &&
                     ast_[r].type == ASTNode::Type::Const) {
-                    if (ast_[r].val == 0.0) throw std::runtime_error("Modulo by zero");
+                    if (ast_[r].val == 0.0)
+                        throw std::runtime_error("Modulo by zero");
                     ast_[n].val = std::fmod(ast_[n].val, ast_[r].val);
                 } else
                     n = makeNode({ASTNode::Type::Binary,
@@ -2238,14 +2677,14 @@ class Compiler {
                 case Builtin::Min:
                 case Builtin::Max:
                     if (call_node.arg_count < 1)
-                        throw std::runtime_error("min/max expect at least 1 argument");
+                        throw std::runtime_error(
+                            "min/max expect at least 1 argument");
                     break;
                 default:
                     if (call_node.arg_count != 1)
                         throw std::runtime_error("Function expects 1 argument");
                     break;
                 }
-
 
                 bool allConst = true;
                 for (uint8_t i = 0; i < call_node.arg_count; ++i) {
