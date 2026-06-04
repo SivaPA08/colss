@@ -29,9 +29,7 @@
 
 namespace evalpp {
 
-// ---------------------------------------------------------------------------
 // Vectorized Math Abstraction (xsimd, SLEEF, Intel SVML)
-// ---------------------------------------------------------------------------
 #if !defined(USE_XSIMD) && __has_include(<xsimd/xsimd.hpp>)
 #define USE_XSIMD 1
 #endif
@@ -786,11 +784,9 @@ struct Inst {
     uint32_t arg;
 };
 
-// -------------------------------------------------------------------------
 // Case-insensitive hash and equality for var_lookup.
 // Both carry is_transparent so that C++20 unordered_map::find() can accept
 // a std::string_view key directly without constructing a std::string.
-// -------------------------------------------------------------------------
 struct CaseInsensitiveHash {
     using is_transparent = void;
 
@@ -840,27 +836,25 @@ class Program {
     std::vector<double> consts;
     std::vector<std::string> var_names;
 
-    // -----------------------------------------------------------------------
     // Precompiled variable storage.
     //   values[slot]  — written by set(), read by eval(values.data()).
     //   var_lookup    — maps variable name (case-insensitive) → slot index.
     //
     // Both are mutable so that set() / eval() are callable on a const Program,
     // e.g. when the Program is stored as a const in a larger structure.
-    // -----------------------------------------------------------------------
+
     mutable std::vector<double> values;
 
     std::unordered_map<std::string, uint32_t, CaseInsensitiveHash,
                        CaseInsensitiveEqual>
         var_lookup;
 
-    // -----------------------------------------------------------------------
     // set(name, value)
     //   Stores a variable value into the precompiled slot.
     //   • O(1) hash lookup — no string compares in the hot path.
     //   • No heap allocations.
     //   • No recompilation.
-    // -----------------------------------------------------------------------
+
     void set(std::string_view name, double value) const {
         // find() uses the transparent hash/equal, so the std::string_view is
         // compared directly against the stored std::string keys without any
@@ -1039,7 +1033,10 @@ class Program {
         double *r = *--sp;
         double *l = *--sp;
         double *dest = sp_storage + (sp - stack) * n;
-        evalpp::vec_pow(l, r, dest, n);
+        for (std::size_t i = 0; i < n; ++i) {
+            dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) ^
+                                          static_cast<int64_t>(r[i]));
+        }
         *sp++ = dest;
         ++ip;
         DISPATCH();
@@ -1413,7 +1410,10 @@ class Program {
                 double *r = *--sp;
                 double *l = *--sp;
                 double *dest = sp_storage + (sp - stack) * n;
-                evalpp::vec_pow(l, r, dest, n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    dest[i] = static_cast<double>(static_cast<int64_t>(l[i]) ^
+                                                  static_cast<int64_t>(r[i]));
+                }
                 *sp++ = dest;
                 ++ip;
                 break;
@@ -1742,8 +1742,9 @@ class Program {
         DISPATCH();
     }
     op_xor: {
-        double r = *--sp;
-        *(sp - 1) = std::pow(*(sp - 1), r);
+        uint64_t r = *--sp;
+        *(sp - 1) = static_cast<double>(static_cast<int64_t>(*(sp - 1)) ^
+                                        static_cast<int64_t>(r));
         ++ip;
         DISPATCH();
     }
@@ -1943,8 +1944,9 @@ class Program {
                 break;
             }
             case Op::Xor: {
-                double r = *--sp;
-                *(sp - 1) = std::pow(*(sp - 1), r);
+                uint64_t r = *--sp;
+                *(sp - 1) = static_cast<double>(
+                    static_cast<int64_t>(*(sp - 1)) ^ static_cast<int64_t>(r));
                 break;
             }
             case Op::Shl: {
@@ -2239,7 +2241,29 @@ class Compiler {
         return n;
     }
 
-    uint32_t parseBitXor() { return parseBitAnd(); }
+    uint32_t parseBitXor() {
+        uint32_t n = parseBitAnd();
+        while (match(TokenType::Caret)) {
+            uint32_t r = parseBitAnd();
+            if (ast_[n].type == ASTNode::Type::Const &&
+                ast_[r].type == ASTNode::Type::Const) {
+                ast_[n].val =
+                    static_cast<double>(static_cast<int64_t>(ast_[n].val) ^
+                                        static_cast<int64_t>(ast_[r].val));
+                continue;
+            }
+            n = makeNode({ASTNode::Type::Binary,
+                          0,
+                          TokenType::Caret,
+                          n,
+                          r,
+                          0,
+                          Builtin::Sin,
+                          0,
+                          {}});
+        }
+        return n;
+    }
 
     uint32_t parseBitAnd() {
         uint32_t n = parseEq();
@@ -2455,37 +2479,11 @@ class Compiler {
         return n;
     }
 
-    uint32_t parsePow() {
+    uint32_t parseMul() {
         uint32_t n = parseUnary();
         while (true) {
-            if (match(TokenType::Caret)) {
-                uint32_t r = parseUnary();
-                if (ast_[n].type == ASTNode::Type::Const &&
-                    ast_[r].type == ASTNode::Type::Const) {
-                    ast_[n].val = std::pow(ast_[n].val, ast_[r].val);
-                } else {
-                    n = makeNode({ASTNode::Type::Binary,
-                                  0,
-                                  TokenType::Caret,
-                                  n,
-                                  r,
-                                  0,
-                                  Builtin::Sin,
-                                  0,
-                                  {}});
-                }
-            } else {
-                break;
-            }
-        }
-        return n;
-    }
-
-    uint32_t parseMul() {
-        uint32_t n = parsePow();
-        while (true) {
             if (match(TokenType::Star)) {
-                uint32_t r = parsePow();
+                uint32_t r = parseUnary();
                 if (ast_[n].type == ASTNode::Type::Const &&
                     ast_[r].type == ASTNode::Type::Const) {
                     ast_[n].val *= ast_[r].val;
@@ -2500,7 +2498,7 @@ class Compiler {
                                   0,
                                   {}});
             } else if (match(TokenType::Slash)) {
-                uint32_t r = parsePow();
+                uint32_t r = parseUnary();
                 if (ast_[n].type == ASTNode::Type::Const &&
                     ast_[r].type == ASTNode::Type::Const) {
                     if (ast_[r].val == 0.0)
@@ -2517,7 +2515,7 @@ class Compiler {
                                   0,
                                   {}});
             } else if (match(TokenType::Percent)) {
-                uint32_t r = parsePow();
+                uint32_t r = parseUnary();
                 if (ast_[n].type == ASTNode::Type::Const &&
                     ast_[r].type == ASTNode::Type::Const) {
                     if (ast_[r].val == 0.0)
@@ -2769,27 +2767,6 @@ class Compiler {
                 }
                 return makeNode(std::move(call_node));
             }
-
-            if (iequals(t.text, "pi"))
-                return makeNode({ASTNode::Type::Const,
-                                 3.14159265358979323846,
-                                 TokenType::End,
-                                 0,
-                                 0,
-                                 0,
-                                 Builtin::Sin,
-                                 0,
-                                 {}});
-            if (iequals(t.text, "e"))
-                return makeNode({ASTNode::Type::Const,
-                                 2.71828182845904523536,
-                                 TokenType::End,
-                                 0,
-                                 0,
-                                 0,
-                                 Builtin::Sin,
-                                 0,
-                                 {}});
 
             for (size_t i = 0; i < var_names_.size(); ++i) {
                 if (iequals(t.text, var_names_[i])) {

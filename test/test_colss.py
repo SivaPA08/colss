@@ -68,14 +68,31 @@ def test_nested_functions():
 
 
 # -----------------------------
-# Exponentiation (Caret) operator
+# Bitwise XOR (Caret) operator
 # -----------------------------
 
-def test_exponentiation():
+def test_bitwise_xor():
     a = np.array([1., 2., 3., 4., 5.])
-    result = colss.query("a^2 + 3*a + 1", a=a)
-    expected = a**2 + 3*a + 1
+    result = colss.query("a^2", a=a)
+    expected = (a.astype(np.int64) ^ 2).astype(float)
     assert np.allclose(result, expected)
+
+
+# -----------------------------
+# Removed constants check
+# -----------------------------
+
+def test_removed_constants():
+    try:
+        colss.query("pi")
+        assert False, "Should have failed to compile unknown variable 'pi'"
+    except Exception as e:
+        assert "Unknown id/variable" in str(e)
+    try:
+        colss.query("e")
+        assert False, "Should have failed to compile unknown variable 'e'"
+    except Exception as e:
+        assert "Unknown id/variable" in str(e)
 
 
 # -----------------------------
