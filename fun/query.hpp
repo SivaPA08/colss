@@ -18,7 +18,7 @@ using namespace std;
 namespace py = pybind11;
 
 // ---------------------------------------------------------------------------
-// FIX 3: Hashed cache key — no heap-growing string concatenation per lookup
+// Hashed cache key — no heap-growing string concatenation per lookup
 // ---------------------------------------------------------------------------
 struct CacheKey {
     std::string expr;
@@ -79,7 +79,6 @@ inline ProgramCache &get_program_cache() {
 
 // ---------------------------------------------------------------------------
 // Require strict double/C-contiguous arrays — no silent forcecast copies.
-// FIX 5: reject bad inputs instead of quietly reallocating.
 // ---------------------------------------------------------------------------
 static py::array_t<double>
 require_double_c_contiguous(py::handle obj, const std::string &name) {
@@ -103,16 +102,11 @@ require_double_c_contiguous(py::handle obj, const std::string &name) {
 
 inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
                                  py::kwargs arrays) {
-    // -----------------------------------------------------------------------
-    // FIX 4: use uint8_t instead of vector<bool> (no packed-bit proxy hell)
-    // -----------------------------------------------------------------------
+
     std::vector<std::string> all_var_names;
     std::vector<uint8_t> is_vector;
     std::vector<const double *> vector_ptrs;
     std::vector<double> scalar_vals;
-
-    // FIX 5: strict input validation — no forcecast copies
-    // Keep Python array references alive during GIL release
     std::vector<py::array_t<double>> handles;
 
     const size_t n_arrays = arrays.size();
@@ -159,7 +153,7 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
     }
 
     // -----------------------------------------------------------------------
-    // FIX 3 (cont.): compile once, using owned names for cache key
+    // Compile once, using owned names for cache key
     // -----------------------------------------------------------------------
     std::vector<std::string_view> compile_var_names;
     compile_var_names.reserve(n_vars);
@@ -176,10 +170,9 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
     }
 
     // -----------------------------------------------------------------------
-    // NEW: Pre-scan input arrays for NaN/Inf — FIX per-user request.
+    // Pre-scan input arrays for NaN/Inf.
     // Build a bitmask so NaN slots are skipped entirely (no wasted compute).
     // -----------------------------------------------------------------------
-    // nan_mask[i] == 1  →  output[i] should be NaN, skip evaluation
     std::vector<uint8_t> nan_mask(n, 0);
     bool any_nan_in_inputs = false;
 
@@ -207,26 +200,10 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
         }
     }
 
-    // -----------------------------------------------------------------------
-    // FIX 1: scalars are NOT expanded into temporary buffers.
-    //   We pass them via a dedicated scalar_vals array; the evaluator accesses
-    //   them as broadcasted constants.  If prog->eval does not yet support
-    //   mixed scalar/vector calling convention, we provide a thin wrapper that
-    //   fills the scalar buffer ONCE per thread (not per block) using a
-    //   thread_local fixed buffer pinned to the scalar variables.
-    //
-    // FIX 2: NaN/Inf scan is fused into the block loop — no second pass.
-    //
-    // FIX 8: block setup cost reduced: scalar pointer is only reset when the
-    //   scalar set changes (it never does), so it is set up once per thread.
-    // -----------------------------------------------------------------------
-
     ssize_t nan_output_index = -1;
     bool has_error = false;
     std::string error_message;
 
-    // Threshold tuned conservatively; profile and adjust for your hardware.
-    // FIX 9: don't pay OpenMP overhead for tiny inputs.
     constexpr ssize_t OMP_THRESHOLD = 8192;
     constexpr ssize_t BLOCK_SIZE = 4096;
 
@@ -239,37 +216,26 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
     shared(has_error, error_message, nan_output_index)
         {
             // ------------------------------------------------------------------
-            // Thread-local pointer array.
-            // FIX 1 + FIX 8: scalar buffers are allocated ONCE per thread and
-            // filled ONCE — not per block — because scalar values are constant.
+            // FIXED SCALAR BROADCASTING:
+            // Allocate a full BLOCK_SIZE buffer for each scalar ONCE per
+            // thread. This prevents out-of-bounds reads when prog->eval strides
+            // by 1.
             // ------------------------------------------------------------------
             thread_local std::vector<const double *> tl_ptrs;
-            thread_local std::vector<double>
-                tl_scalar_buf; // one slot per scalar var
+            thread_local std::vector<double> tl_scalar_bufs;
 
-            // Resize lazily (only grows, never shrinks — fine for a cache)
             if (tl_ptrs.size() < num_variables)
                 tl_ptrs.resize(num_variables);
 
-            // Count scalars and build their one-per-thread single-element
-            // buffers. We store exactly ONE double per scalar variable — no
-            // block-sized copy. This is valid because prog->eval will broadcast
-            // them internally, OR we construct a compact per-element wrapper
-            // below.
-            //
-            // Strategy: fill tl_scalar_buf with scalar values once, point ptrs
-            // at them. When evaluating block [i, i+block_len), scalar ptrs
-            // don't change.
-            if (tl_scalar_buf.size() < num_variables)
-                tl_scalar_buf.resize(num_variables);
+            if (tl_scalar_bufs.size() < num_variables * BLOCK_SIZE)
+                tl_scalar_bufs.resize(num_variables * BLOCK_SIZE);
 
+            // Fill the scalar buffers once per thread
             for (size_t j = 0; j < num_variables; ++j) {
                 if (!is_vector[j]) {
-                    tl_scalar_buf[j] = scalar_vals[j];
-                    // ptr points at a single double; the evaluator strides by 0
-                    // if it supports scalar broadcasting, otherwise see note
-                    // (*).
-                    tl_ptrs[j] = &tl_scalar_buf[j];
+                    double *buf_ptr = &tl_scalar_bufs[j * BLOCK_SIZE];
+                    std::fill_n(buf_ptr, BLOCK_SIZE, scalar_vals[j]);
+                    tl_ptrs[j] = buf_ptr;
                 }
             }
 
@@ -280,8 +246,7 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
 
                 const ssize_t block_len = std::min(BLOCK_SIZE, n - i);
 
-                // Fast-path: if every element in this block is NaN-masked, skip
-                // entirely.
+                // Fast-path: skip if whole block is masked
                 if (any_nan_in_inputs) {
                     bool all_nan = true;
                     for (ssize_t k = 0; k < block_len; ++k) {
@@ -295,27 +260,14 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
                 }
 
                 // Set vector variable pointers for this block.
-                // FIX 8: scalar ptrs were set once above — no work here for
-                // scalars.
+                // Scalar ptrs remain pointed to the start of their thread_local
+                // buffer.
                 for (size_t j = 0; j < num_variables; ++j) {
                     if (is_vector[j])
                         tl_ptrs[j] = vector_ptrs[j] + i;
-                    // scalar ptrs: already set per-thread, never change
                 }
 
-                // (*) NOTE: if prog->eval requires all pointers to have stride
-                // 1
-                //   and does NOT support scalar broadcasting, replace the
-                //   scalar handling above with a thread_local BLOCK_SIZE buffer
-                //   filled once per thread (not per block) using std::fill_n at
-                //   thread init. Since scalar values are constant across all
-                //   blocks, the fill happens once, not O(n/BLOCK_SIZE) times —
-                //   avoiding FIX 1's drain.
-
                 try {
-                    // Partial-NaN block: if any element in this block is
-                    // masked, we must handle it element by element to avoid
-                    // polluting non-NaN output slots.
                     if (any_nan_in_inputs) {
                         bool block_has_nan = false;
                         for (ssize_t k = 0; k < block_len; ++k) {
@@ -329,15 +281,17 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
                             // Evaluate only non-NaN elements individually
                             for (ssize_t k = 0; k < block_len; ++k) {
                                 if (nan_mask[i + k])
-                                    continue; // already NaN
+                                    continue;
 
-                                // Single-element eval
                                 std::vector<const double *> elem_ptrs(
                                     num_variables);
                                 for (size_t j = 0; j < num_variables; ++j) {
-                                    elem_ptrs[j] =
-                                        is_vector[j] ? (vector_ptrs[j] + i + k)
-                                                     : &tl_scalar_buf[j];
+                                    // For vectors we add k to get the specific
+                                    // element. For scalars we can just point to
+                                    // the start of the buffer.
+                                    elem_ptrs[j] = is_vector[j]
+                                                       ? (tl_ptrs[j] + k)
+                                                       : tl_ptrs[j];
                                 }
                                 prog->eval(1, result_ptr + i + k,
                                            elem_ptrs.data());
@@ -360,9 +314,7 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
                     continue;
                 }
 
-                // FIX 2: NaN/Inf check fused into this same pass — no second
-                // scan. Only check output slots that were actually computed
-                // (non-NaN inputs).
+                // NaN/Inf output validation
                 for (ssize_t k = 0; k < block_len; ++k) {
                     if (any_nan_in_inputs && nan_mask[i + k])
                         continue;
@@ -373,12 +325,12 @@ inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
                                 i + k < nan_output_index)
                                 nan_output_index = i + k;
                         }
-                        break; // only need the first bad index per block
+                        break;
                     }
                 }
             }
-        } // end omp parallel
-    } // end GIL release
+        }
+    }
 
     if (has_error)
         throw std::runtime_error(error_message);
