@@ -76,7 +76,7 @@ target_include_directories(_colss PRIVATE ${CMAKE_SOURCE_DIR}/include)
 if(MSVC)
     target_compile_options(_colss PRIVATE /O2)
 else()
-    target_compile_options(_colss PRIVATE -O3 -march=native -mtune=native)
+    target_compile_options(_colss PRIVATE -O3 -march=native -mtune=native -ffast-math -fno-finite-math-only -funroll-loops)
 endif()
 
 # Install targets

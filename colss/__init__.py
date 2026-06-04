@@ -1,69 +1,28 @@
-import inspect
-import re
 import numpy as np
-from colss._colss import sumof as _sumof
-from colss._colss import prod as _prod
-from colss._colss import mean as _mean
 from colss._colss import query as _query
-from colss._colss import sd as _sd
-from colss._colss import var as _var
-from colss._colss import median as _median
 
-def _collect_vars(expr: str):
-    frame = inspect.currentframe()
-    frame = frame.f_back.f_back if frame and frame.f_back else None
-
+def query(expr: str, **kwargs) -> np.ndarray:
     arrays = {}
     scalars = {}
+    shape = None
 
-    while frame is not None:
+    for name, val in kwargs.items():
+        if isinstance(val, np.ndarray):
+            arr = np.ascontiguousarray(val, dtype=np.float64)
+            arrays[name] = arr
+            if shape is None:
+                shape = val.shape
+            elif val.shape != shape:
+                raise ValueError(f"Array shape mismatch: {val.shape} vs {shape}")
+        elif isinstance(val, (int, float)):
+            scalars[name] = float(val)
+        else:
+            raise TypeError(f"Unsupported variable type for {name}: {type(val)}")
 
-        for name, val in frame.f_locals.items():
+    # Evaluate using the C++ backend
+    res = _query(expr, scalars, **arrays)
 
-            if not re.search(rf"\b{re.escape(name)}\b", expr):
-                continue
-
-            if isinstance(val, np.ndarray):
-
-                if name not in arrays:
-                    arrays[name] = np.ascontiguousarray(
-                        val,
-                        dtype=np.float64
-                    )
-
-            elif isinstance(val, (int, float)):
-
-                if name not in scalars:
-                    scalars[name] = float(val)
-
-        frame = frame.f_back
-
-    return arrays, scalars
-
-def sumof(expr: str) -> float:
-    arrays, scalars = _collect_vars(expr)
-    return _sumof(expr, scalars, **arrays)
-
-def prod(expr: str) -> float:
-    arrays, scalars = _collect_vars(expr)
-    return _prod(expr, scalars, **arrays)
-
-def mean(expr: str) -> float:
-    arrays, scalars = _collect_vars(expr)
-    return _mean(expr, scalars, **arrays)
-
-def query(expr: str) -> np.ndarray:
-    arrays, scalars = _collect_vars(expr)
-    return _query(expr, scalars, **arrays)
-
-def sd(expr: str) -> float:
-    arrays, scalars = _collect_vars(expr)
-    return _sd(expr, scalars, **arrays)
-
-def var(expr: str) -> float:
-    arrays, scalars = _collect_vars(expr)
-    return _var(expr, scalars, **arrays)
-
-def median(expr: str) -> float:
-    arrays, scalars = _collect_vars(expr)
-    return _median(expr, scalars, **arrays)
+    # Reshape to the original N-dimensional shape
+    if shape is not None:
+        return res.reshape(shape)
+    return res

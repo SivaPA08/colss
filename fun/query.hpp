@@ -9,117 +9,193 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <mutex>
+#include <memory>
 
 using namespace std;
 namespace py = pybind11;
 
+struct ProgramCache {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::shared_ptr<const evalpp::Program>> map;
+
+    std::shared_ptr<const evalpp::Program> get_or_compile(const std::string& expr, const std::vector<std::string_view>& var_names) {
+        std::string cache_key = expr + "||";
+        for (const auto& name : var_names) {
+            cache_key += std::string(name) + ",";
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            auto it = map.find(cache_key);
+            if (it != map.end()) {
+                return it->second;
+            }
+        }
+
+        auto prog = std::make_shared<evalpp::Program>(evalpp::compile(expr, var_names));
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            map[cache_key] = prog;
+        }
+
+        return prog;
+    }
+};
+
+inline ProgramCache& get_program_cache() {
+    static ProgramCache cache;
+    return cache;
+}
+
 inline py::array_t<double> query(std::string expr, py::dict scalar_dict,
                                  py::kwargs arrays) {
-    using T = double;
+    // Collect all variable names and values/ptrs
+    std::vector<std::string> all_var_names;
+    std::vector<bool> is_vector;
+    std::vector<const double *> vector_ptrs;
+    std::vector<double> scalar_vals;
 
-    std::unordered_map<std::string, double> scalars;
-    for (auto item : scalar_dict)
-        scalars[item.first.cast<std::string>()] = item.second.cast<double>();
-
-    size_t n_vars = arrays.size();
-
-    std::vector<std::string> names;
-    std::vector<const double *> ptrs;
-    std::vector<ssize_t> sizes;
+    // Keep Python array references alive during GIL release
     std::vector<py::array_t<double, py::array::c_style | py::array::forcecast>>
-        handles; // MODIFIED
+        handles;
 
-    names.reserve(n_vars);
-    ptrs.reserve(n_vars);
-    sizes.reserve(n_vars);
-    handles.reserve(n_vars); // MODIFIED
+    all_var_names.reserve(arrays.size() + scalar_dict.size());
+    is_vector.reserve(arrays.size() + scalar_dict.size());
+    vector_ptrs.reserve(arrays.size() + scalar_dict.size());
+    scalar_vals.reserve(arrays.size() + scalar_dict.size());
+    handles.reserve(arrays.size());
 
     for (auto item : arrays) {
         std::string name = item.first.cast<std::string>();
         using arr_t =
             py::array_t<double, py::array::c_style | py::array::forcecast>;
         auto arr = item.second.cast<arr_t>();
-        if (arr.ndim() != 1)
-            throw std::runtime_error("Array must be 1D");
-        names.push_back(name);
-        ptrs.push_back(arr.data());
-        sizes.push_back(arr.size());
-        handles.push_back(arr); // MODIFIED
+        
+        all_var_names.push_back(name);
+        is_vector.push_back(true);
+        vector_ptrs.push_back(arr.data());
+        scalar_vals.push_back(0.0);
+        handles.push_back(arr);
     }
 
-    ssize_t n = n_vars > 0 ? sizes[0] : 1;
-    for (size_t j = 1; j < n_vars; ++j)
-        if (sizes[j] != n)
+    for (auto item : scalar_dict) {
+        std::string name = item.first.cast<std::string>();
+        double val = item.second.cast<double>();
+
+        all_var_names.push_back(name);
+        is_vector.push_back(false);
+        vector_ptrs.push_back(nullptr);
+        scalar_vals.push_back(val);
+    }
+
+    // Determine target array size n
+    ssize_t n = handles.empty() ? 1 : handles[0].size();
+    for (size_t j = 1; j < handles.size(); ++j) {
+        if (handles[j].size() != n) {
             throw std::runtime_error("Array size mismatch");
+        }
+    }
 
-    // MODIFIED: allocate result before GIL release, it's a Python object
+    // Precompile the expression outside of parallel blocks (or retrieve from global cache)
+    std::vector<std::string_view> compile_var_names;
+    compile_var_names.reserve(all_var_names.size());
+    for (const auto &name : all_var_names) {
+        compile_var_names.push_back(name);
+    }
+
+    std::shared_ptr<const evalpp::Program> prog;
+    try {
+        prog = get_program_cache().get_or_compile(expr, compile_var_names);
+    } catch (const std::exception &e) {
+        throw std::runtime_error("Expression failed to compile: " + expr);
+    }
+
     py::array_t<double> result(n);
-    auto buf = result.mutable_unchecked<1>();
+    double *result_ptr = result.mutable_data();
 
-    ssize_t nan_index =
-        -1; // MODIFIED: -1=ok, -2=compile error, >=0=NaN/Inf index
+    ssize_t nan_index = -1;
+    bool has_error = false;
+    std::string error_message = "";
 
-    { // MODIFIED: release GIL before OMP — nothing below touches Python objects
+    constexpr ssize_t BLOCK_SIZE = 4096;
+    size_t num_variables = all_var_names.size();
+
+    {
         py::gil_scoped_release release;
 
-#pragma omp parallel
+#pragma omp parallel if(n >= 8192) shared(has_error, error_message, nan_index)
         {
-            exprtk::symbol_table<T> symbol_table;
-            exprtk::expression<T> expression;
-            exprtk::parser<T>
-                local_parser; // MODIFIED: per-thread, no data race
+            // Thread-local preallocated buffers for variables
+            thread_local std::vector<double> thread_local_scalar_buffers;
+            thread_local std::vector<const double *> thread_local_ptrs;
 
-            std::vector<T> variables(n_vars, 0.0);
-
-            for (size_t j = 0; j < n_vars; ++j)
-                symbol_table.add_variable(names[j], variables[j]);
-
-            std::unordered_map<std::string, T> scalar_locals(scalars.begin(),
-                                                             scalars.end());
-            for (auto &[name, val] : scalar_locals)
-                symbol_table.add_variable(name, scalar_locals[name]);
-
-            symbol_table.add_constants();
-            expression.register_symbol_table(symbol_table);
-
-            // MODIFIED: store sentinel instead of throwing inside OMP
-            if (!local_parser.compile(expr, expression)) {
-#pragma omp critical
-                if (nan_index == -1)
-                    nan_index = -2;
+            if (thread_local_scalar_buffers.size() < num_variables * BLOCK_SIZE) {
+                thread_local_scalar_buffers.resize(num_variables * BLOCK_SIZE);
+            }
+            if (thread_local_ptrs.size() < num_variables) {
+                thread_local_ptrs.resize(num_variables);
             }
 
 #pragma omp for schedule(static)
-            for (ssize_t i = 0; i < n; ++i) {
-                if (nan_index != -1)
-                    continue; // MODIFIED: cheap bail on error
+            for (ssize_t i = 0; i < n; i += BLOCK_SIZE) {
+                if (has_error || nan_index != -1)
+                    continue;
 
-                for (size_t j = 0; j < n_vars; ++j)
-                    variables[j] = ptrs[j][i];
+                ssize_t block_len = std::min(BLOCK_SIZE, n - i);
 
-                T val = expression.value();
+                // Set up variable pointers for this block
+                for (size_t j = 0; j < num_variables; ++j) {
+                    if (is_vector[j]) {
+                        thread_local_ptrs[j] = vector_ptrs[j] + i;
+                    } else {
+                        double val = scalar_vals[j];
+                        double *buf =
+                            &thread_local_scalar_buffers[j * BLOCK_SIZE];
+                        std::fill_n(buf, block_len, val);
+                        thread_local_ptrs[j] = buf;
+                    }
+                }
 
-                // MODIFIED: store sentinel instead of throwing inside OMP
-                if (!std::isfinite(val)) [[unlikely]] {
+                // Evaluate block
+                try {
+                    prog->eval(block_len, result_ptr + i,
+                               thread_local_ptrs.data());
+                } catch (const std::exception &e) {
 #pragma omp critical
-                    if (nan_index == -1)
-                        nan_index = i;
+                    {
+                        if (!has_error) {
+                            has_error = true;
+                            error_message = e.what();
+                        }
+                    }
                     continue;
                 }
 
-                buf(i) = val;
+                // Check for NaN/Inf in the evaluated block
+                for (ssize_t k = 0; k < block_len; ++k) {
+                    if (!std::isfinite(result_ptr[i + k])) {
+#pragma omp critical
+                        {
+                            if (nan_index == -1 || i + k < nan_index) {
+                                nan_index = i + k;
+                            }
+                        }
+                        break;
+                    }
+                }
             }
         }
+    }
 
-    } // MODIFIED: GIL reacquired here, handles and result safely accessible
-      // after this
-
-    // MODIFIED: all throws happen here, outside OMP and after GIL reacquired
-    if (nan_index == -2)
-        throw std::runtime_error("Expression failed to compile: " + expr);
-    if (nan_index >= 0)
+    if (has_error) {
+        throw std::runtime_error(error_message);
+    }
+    if (nan_index >= 0) {
         throw std::runtime_error("NaN/Inf detected at index " +
-                                 to_string(nan_index));
+                                 std::to_string(nan_index));
+    }
 
     return result;
 }
