@@ -18,6 +18,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include "fast_float.h"
 #include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
@@ -703,7 +704,7 @@ class Lexer {
 
         double val = 0.0;
         auto [ptr, ec] =
-            std::from_chars(input_.data() + start, input_.data() + pos_, val);
+            fast_float::from_chars(input_.data() + start, input_.data() + pos_, val);
         if (ec != std::errc()) {
             throw std::runtime_error("Lexer error: Invalid number format");
         }
